@@ -1,5 +1,5 @@
 import torch
-from torch import tensor
+import math
 import numpy as np
 from Ionic_current.Ord11.initial import Initial_ORd11
 
@@ -12,12 +12,13 @@ class Constants:
             nbeats = 5,
             Ncell = 1,
             model = 'Ord11',
-            GJ_coupling = 'strong'
+            GJ_coupling = 'strong',
+            dt_factor = 1
             ) -> None:
         
         # Basic parameters
         self.Nint = 1 # number of intracellular nodes
-        self.dt_factor = 1
+        self.dt_factor = dt_factor
         self.device = device
         self.dtype = dtype
 
@@ -99,19 +100,19 @@ class Constants:
         ts = []
 
         while ti < T_end:
-            if np.fmod(ti, self.parameters['bcl']) < self.twin:
+            if abs(math.fmod(ti, self.parameters['bcl'])) < self.twin:
                 dt = self.dt1
                 dt_samp = self.dt1_samp
             else:
                 dt = self.dt2
                 dt_samp = self.dt2_samp
 
-            if abs(np.fmod(ti, dt_samp)) < 1e-8:
+            if abs(math.fmod(ti, dt_samp)) < 1e-8:
                 ts.append(ti)
 
             ti = round(ti + dt, 5)
 
-        return tensor(ts, device=self.device, dtype=self.dtype)
+        return np.array(ts)
 
 
         

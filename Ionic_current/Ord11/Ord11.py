@@ -1,15 +1,15 @@
 import torch
-from torch import Tensor, tensor
+from torch import Tensor
 from typing import Dict, Tuple
-from PermanentConstants import Constants
 import numpy as np
+
 @torch.no_grad()
 def Ord11_model(t:float, 
                 state:Tensor, 
                 parameters: Dict, 
                 S: Tensor,
                 device:torch.device,
-                dtype: torch.dtype = torch.float32) -> Tuple[Tensor, Tensor, Tensor]:
+                dtype: torch.dtype = torch.float32) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Compute the derivatives for the Ord11 ionic current model.
         https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1002061
         This is the vectorized code for ORd11 model, the goal of this model is to simulate human ventricular cardiomyocyte action potential.
@@ -55,7 +55,7 @@ def Ord11_model(t:float,
     dt = parameters.get('dt', 0.01)  # time step in ms
     dt = torch.tensor(dt, device=device, dtype=dtype)
     N  = parameters.get('N', 1)      # number of compartments
-
+    dX = torch.zeros_like(state, device=device, dtype=dtype)  # placeholder for derivatives
     # Physical constants
     R = 8314.0     # J/(mol·K)
     T = 310.0      # K
@@ -861,4 +861,46 @@ def Ord11_model(t:float,
     # CaMKt (Forward Euler)
     G_new[39*N:40*N] = CaMKt + dt * dCaMKt
 
-    return Iion, current_matrix, G_new
+    if N == 1:
+        dX[0:N] = -Iion / parameters['Ctot']
+        dX[N:2*N] = dnai
+        dX[2*N:3*N] = dnass
+        dX[3*N:4*N] = dki
+        dX[4*N:5*N] = dkss
+        dX[5*N:6*N] = dcai
+        dX[6*N:7*N] = dcass
+        dX[7*N:8*N] = dcansr
+        dX[8*N:9*N] = dcajsr
+        dX[9*N:10*N] = (mss - m) / tm
+        dX[10*N:11*N] = (hss - hf) / thf
+        dX[11*N:12*N] = (hss - hs) / ths
+        dX[12*N:13*N] = (jss - j) / tj
+        dX[13*N:14*N] = (hssp - hsp) / thsp
+        dX[14*N:15*N] = (jss - jp) / tjp
+        dX[15*N:16*N] = (mLss - mL) / tmL
+        dX[16*N:17*N] = (hLss - hL) / thL
+        dX[17*N:18*N] = (hLssp - hLp) / thLp
+        dX[18*N:19*N] = (ass - a) / ta
+        dX[19*N:20*N] = (iss - iF) / tiF
+        dX[20*N:21*N] = (iss - iS) / tiS
+        dX[21*N:22*N] = (assp - ap) / ta
+        dX[22*N:23*N] = (iss - iFp) / tiFp
+        dX[23*N:24*N] = (iss - iSp) / tiSp
+        dX[24*N:25*N] = (dss - d) / td
+        dX[25*N:26*N] = (fss - ff) / tff
+        dX[26*N:27*N] = (fss - fs) / tfs
+        dX[27*N:28*N] = (fcass - fcaf) / tfcaf
+        dX[28*N:29*N] = (fcass - fcas) / tfcas
+        dX[29*N:30*N] = (fcass - jca) / tjca
+        dX[30*N:31*N] = dnca
+        dX[31*N:32*N] = (fss - ffp) / tffp
+        dX[32*N:33*N] = (fcass - fcafp) / tfcafp
+        dX[33*N:34*N] = (xrss - xrf) / txrf
+        dX[34*N:35*N] = (xrss - xrs) / txrs
+        dX[35*N:36*N] = (xs1ss - xs1) / txs1
+        dX[36*N:37*N] = (xs2ss - xs2) / txs2
+        dX[37*N:38*N] = (xk1ss - xk1) / txk1
+        dX[38*N:39*N] = (Jrel_inf - Jrelnp) / tau_rel
+        dX[39*N:40*N] = (Jrel_infp - Jrelp) / tau_relp
+        dX[40*N:41*N] = dCaMKt
+    return Iion, current_matrix, G_new, dX
