@@ -47,5 +47,5 @@ def Initial_ORd11(device, dtype = torch.float32):
             0.000122276951936
         ]
     )
-    x0 = tensor(1e2 * value, device=device, dtype=dtype)
+    x0 = tensor(1e2*value, device=device, dtype=dtype)
     return x0

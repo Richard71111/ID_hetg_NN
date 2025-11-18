@@ -83,7 +83,7 @@ class Constants:
             self.parameters['Nstate'] = 41-1 # number of state variables in the model
             # stimulus parameters
             self.parameters['stim_dur'] = 2.0    # ms, stimulus duration
-            self.parameters['stim_amp'] = 50     # uA/uF, stimulus amplitude
+            self.parameters['stim_amp'] = 10     # uA/uF, stimulus amplitude
             indstim = torch.zeros(self.parameters['N'], device=self.device, dtype=self.dtype)
             indstim[:3] = 1  # stimulate first three cells
             self.parameters['indstim'] = indstim # indicator vector for stimulated cells
@@ -92,7 +92,7 @@ class Constants:
         self.x0 = Initial_ORd11(self.device, self.dtype)  # initial state variables
         self.phi0    = torch.full((self.parameters['N'],), self.x0[0].item(), device=self.device, dtype=self.dtype)  # initial membrane potential
         x0_values = self.x0[1:]                 # initial gating variables
-        self.g0 = torch.repeat_interleave(x0_values, repeats=self.parameters['N'])
+        self.g0 = torch.repeat_interleave(x0_values, repeats=self.parameters['N']) # pyright: ignore[reportGeneralTypeIssues]
     def _get_time_variable(self):
         """Generate time sequence variable based on adaptive time step."""
         ti = self.trange[0]
