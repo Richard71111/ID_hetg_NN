@@ -8,12 +8,13 @@ class Constants:
             self, 
             device,
             dtype=torch.float32,
-            bcl = 400, 
-            nbeats = 5,
-            Ncell = 1,
-            model = 'Ord11',
-            GJ_coupling = 'strong',
-            dt_factor = 1
+            bcl: int = 400, 
+            nbeats: int = 5,
+            Ncell: int = 1,
+            model: str = 'Ord11',
+            GJ_coupling: float = 735,
+            dt_factor: float = 1,
+            stim_amplitude: float = 50
             ) -> None:
         
         # Basic parameters
@@ -65,10 +66,7 @@ class Constants:
         )
         self.S = S # concatenated concentration vector (4N, )
         # GJ coupling parameters
-        if GJ_coupling == 'strong':
-            self.parameters['Ggap'] = 735  # nS
-        else:
-            self.parameters['Ggap'] = 73.5 # nS
+        self.parameters['Ggap'] = GJ_coupling # nS GJ conductance
 
         # Ionic model parameters
         self.model = 'Ord11'
@@ -82,8 +80,8 @@ class Constants:
 
             self.parameters['Nstate'] = 41-1 # number of state variables in the model
             # stimulus parameters
-            self.parameters['stim_dur'] = 2.0    # ms, stimulus duration
-            self.parameters['stim_amp'] = 10     # uA/uF, stimulus amplitude
+            self.parameters['stim_dur'] = 2.0                # ms, stimulus duration
+            self.parameters['stim_amp'] = stim_amplitude     # uA/uF, stimulus amplitude
             indstim = torch.zeros(self.parameters['N'], device=self.device, dtype=self.dtype)
             indstim[:3] = 1  # stimulate first three cells
             self.parameters['indstim'] = indstim # indicator vector for stimulated cells
@@ -115,4 +113,24 @@ class Constants:
         return np.array(ts)
 
 
-        
+class Normalization:
+    def __init__(self, scaler, device, dtype=torch.float32) -> None:
+        self.device  = device
+        self.dtype   = dtype
+        self.scaler  = scaler
+        self.Vmean   = torch.tensor(self.scaler.mean_[2:], device=self.device, dtype=self.dtype)
+        self.Vscale  = torch.tensor(self.scaler.scale_[2:], device=self.device, dtype=self.dtype)
+        self.Imean   = torch.tensor(self.scaler.mean_[:2], device=self.device, dtype=self.dtype)
+        self.Iscale  = torch.tensor(self.scaler.scale_[:2], device=self.device, dtype=self.dtype)
+    def normalizeV(self, V):
+        V_norm = (V - self.Vmean) / self.Vscale
+        return V_norm
+    def denormalizeV(self, V_norm):
+        V = V_norm * self.Vscale + self.Vmean
+        return V
+    def normalizeI(self, I):
+        I_norm = (I - self.Imean) / self.Iscale
+        return I_norm
+    def denormalizeI(self, I_norm):
+        I = I_norm * self.Iscale + self.Imean
+        return I
