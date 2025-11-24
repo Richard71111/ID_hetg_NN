@@ -47,15 +47,16 @@ def train_model(model: nn.Module,
                 grad_clip: Optional[float]=None,
                 patience: int=5, 
                 min_delta: int=0,
-                best_model_state_name: Optional[str]=None):
+                best_model_state_name: Optional[str]=None,
+                model_name = 'ResNet'):
     
     model.to(device)
 
     best_model_state_name = best_model_state_name or "best_model.pth"
-    early_stopping = EarlyStopping(patience=patience, min_delta=min_delta, model='ResNet',
+    early_stopping = EarlyStopping(patience=patience, min_delta=min_delta, model=model_name,
                                   file_name=best_model_state_name)
     
-    for epoch in tqdm.tqdm(range(epochs), desc="Training ResNet"):
+    for epoch in tqdm.tqdm(range(epochs), desc="Training " + model_name):
         train_loss = train_epoch(model, train_dataloader, loss_fn, optimizer, grad_clip)
         val_loss = validate_epoch(model, val_dataloader, loss_fn)
         
