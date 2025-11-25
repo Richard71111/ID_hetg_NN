@@ -26,7 +26,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 train_DS = Conv1Dataset(device)
 train_DS.normalize()
 scaler = train_DS.stats
-val_DS = Conv1Dataset(device=device,mode='validation',stats=scaler)
+val_DS = Conv1Dataset(device=device,mode='valid',stats=scaler)
 test_DS = Conv1Dataset(device=device,mode='test',stats=scaler)
 
 test_DS.normalize()
@@ -63,7 +63,8 @@ else:
     mymodel.load_state_dict(torch.load(os.path.join(model_state_path, best_model_state_name)))
     print("Loaded pre-trained model.")
 
-avg_test_loss = test_model(mymodel,
+avg_test_loss = test_model(
+                            mymodel,
                             test_DL,
                             loss_fn
                             )
