@@ -1,6 +1,7 @@
-from dataset import Conv1Dataset
+#from dataset import Conv1Dataset
+from Model_training_code.dataset import TestDataset as Conv1Dataset
 from model import ResNet1D
-from train_eval_fn import train_model,test_model
+from Model_training_code.train_eval_fn import train_model,test_model
 from torch.utils.data import DataLoader
 from torch import nn, optim
 import torch
@@ -66,7 +67,8 @@ else:
 avg_test_loss = test_model(
                             mymodel,
                             test_DL,
-                            loss_fn
+                            loss_fn,
+                            device
                             )
 end_time = time.time()
 elapsed_time = end_time - start_time

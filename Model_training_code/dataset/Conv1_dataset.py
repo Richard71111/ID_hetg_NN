@@ -72,5 +72,27 @@ class Conv1Dataset(Dataset):
     def __getitem__(self, idx):
         x = self.inputs[idx, :, 1:-1]
         y = self.labels[idx, :, 1:-1]
-        return torch.tensor(x, device=self.device), torch.tensor(y, device=self.device)
+        return x,y
 
+class TestDataset(Dataset):
+    def __init__(self,
+                 device,
+                 dtype = torch.float32,
+                 mode = 'train',
+                 Ncell = 50,
+                 GJ_coupling = "strong",
+                 stats = None
+    ):
+        super(TestDataset, self).__init__()
+        self.X = torch.randn(5000,7,50,dtype=dtype)
+        self.Y = torch.randn(5000,1,50,dtype=dtype)
+        self.stats = torch.rand(1,1,1)
+        self.device = device
+        self.dtype = dtype
+
+    def __len__(self):
+        return self.X.shape[0]
+    def __getitem__(self, idx):
+        return self.X[idx],self.Y[idx]
+    def normalize(self):
+        pass

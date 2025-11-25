@@ -1,5 +1,5 @@
 import torch.nn as nn
-from Early_Stop import EarlyStopping
+from .Early_Stop import EarlyStopping
 from torch.utils.data import DataLoader
 import torch
 from typing import Optional
@@ -9,10 +9,12 @@ def train_epoch(model: nn.Module,
                 data_loader: DataLoader,
                 loss_fn,
                 opt,
+                device,
                 grad_clip=None):
     model.train()
     total_loss = 0.0
     for inputs, targets in data_loader:
+        inputs, targets = inputs.to(device), targets.to(device)
         opt.zero_grad()
         outputs = model(inputs)
         loss = loss_fn(outputs, targets)
@@ -26,11 +28,13 @@ def train_epoch(model: nn.Module,
 
 def validate_epoch(model: nn.Module,
                 data_loader: DataLoader,
+                device,
                 loss_fn):
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
         for inputs, targets in data_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
             total_loss += loss.item() * inputs.size(0)
@@ -57,8 +61,8 @@ def train_model(model: nn.Module,
                                   file_name=best_model_state_name)
     
     for epoch in tqdm.tqdm(range(epochs), desc="Training " + model_name):
-        train_loss = train_epoch(model, train_dataloader, loss_fn, optimizer, grad_clip)
-        val_loss = validate_epoch(model, val_dataloader, loss_fn)
+        train_loss = train_epoch(model, train_dataloader, loss_fn, optimizer, device, grad_clip)
+        val_loss = validate_epoch(model, val_dataloader, device, loss_fn)
         
         if scheduler:
             scheduler.step(val_loss)
@@ -75,12 +79,14 @@ def train_model(model: nn.Module,
 
 def test_model(model,
              test_dl: torch.utils.data.DataLoader,
-             loss_fn
+             loss_fn,
+             device
              ):
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
         for inputs, targets in test_dl:
+            inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
             total_loss += loss.item() * inputs.size(0)
