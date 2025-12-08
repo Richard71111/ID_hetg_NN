@@ -134,3 +134,26 @@ class Normalization:
     def denormalizeI(self, I_norm):
         I = I_norm * self.Iscale + self.Imean
         return I
+class NormalizationCNN:
+    def __init__(self, stats, slices, device, dtype=torch.float32) -> None:
+        self.Inmean = stats['Inmean'].to(device, dtype)[:, :, slices]
+        self.Instd  = stats['Instd'].to(device, dtype)[:, :, slices]
+        self.Outmean = stats['Outmean'].to(device, dtype)[:, :, slices]
+        self.Outstd  = stats['Outstd'].to(device, dtype)[:, :, slices]
+
+    def NormalizeInput(self, V):
+        V_norm = (V - self.Inmean) / self.Instd
+        return V_norm
+
+    def DenormalizeInput(self, V_norm):
+        V = V_norm * self.Instd + self.Inmean
+        return V
+
+    def NormalizeOutput(self, I):
+        I_norm = (I - self.Outmean) / self.Outstd
+        return I_norm
+
+    def DenormalizeOutput(self, I_norm):
+        I = I_norm * self.Outstd + self.Outmean
+        return I
+

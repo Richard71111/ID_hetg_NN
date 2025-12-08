@@ -1,10 +1,10 @@
 import torch.nn as nn
 
 class ResidualBlock(nn.Module):
-    def __init__(self, channels, kernel_size = 3, num_groups = 4) -> None:
+    def __init__(self, channels, kernel_size = 2, num_groups = 4) -> None:
         super().__init__()
 
-        padding = (kernel_size - 1) // 2
+        padding = (kernel_size-1)//2
         # Build convolutional layer
         self.conv1 = nn.Conv1d(channels, channels, kernel_size, padding=padding)
         self.gn1   = nn.GroupNorm(num_groups=num_groups, num_channels=channels)
@@ -35,13 +35,13 @@ class ResNet1D(nn.Module):
     def __init__(self,
                  in_channels: int = 7,
                  hidden_channels: int = 32,
-                 out_channels: int = 1,
+                 out_channels: int = 2,
                  num_blocks: int = 4,
                  kernel_size: int = 3,
                  num_groups: int = 4):
         super().__init__()
 
-        padding = kernel_size // 2
+        padding = (kernel_size-1)//2
 
         self.stem = nn.Sequential(
             nn.Conv1d(in_channels, hidden_channels, kernel_size,
@@ -56,8 +56,7 @@ class ResNet1D(nn.Module):
                                      kernel_size=kernel_size,
                                      num_groups=num_groups))
         self.blocks = nn.Sequential(*blocks)
-        self.head   = nn.Conv1d(hidden_channels, out_channels, kernel_size,
-                                padding=padding)
+        self.head   = nn.Conv1d(hidden_channels, out_channels, 2)
         self._init_weights()
 
     def _init_weights(self):
