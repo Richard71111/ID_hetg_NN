@@ -70,7 +70,7 @@ def plot_2D_map(
             f"time length ({len(time)}) must match data.shape[0] ({data.shape[0]})"
         )
 
-    T, N = data.shape
+    _, N = data.shape
 
     # meshgrid: X -> cell index, Y -> time
     X, Y = np.meshgrid(

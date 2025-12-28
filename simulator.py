@@ -1,8 +1,14 @@
 import torch
 import math
 import time
+import joblib
+from PermanentConstants import NormalizationCNN
 
-class ResistorCoupling:
+class CouplingBase:
+    def compute(self, phi_i, ti=None):
+        raise NotImplementedError("CouplingBase is an abstract class.")
+
+class ResistorCoupling(CouplingBase):
     def __init__(self, N, Ggap, device, dtype):
         self.N = N
         self.Ggap = Ggap
@@ -19,20 +25,50 @@ class ResistorCoupling:
         I[0]    = G * (phi_i[0]  - phi_i[1])
         I[-1]   = G * (phi_i[-1] - phi_i[-2])
         return I
-    
-class NNCleftCoupling:
-    def __init__(self, N, Ggap, boundary, model, normalize=None, device=None, dtype=torch.float32):
+
+class NNSimpleCoupling(CouplingBase):
+    def __init__(self, 
+                 N, 
+                 Ggap, 
+                 boundary, 
+                 model,
+                 GJ_coupling='SingleGJ',
+                 model_name = "ResNet", 
+                 if_normalize=None, 
+                 device=None, 
+                 dtype=torch.float32):
         self.N = N
         self.Ggap = Ggap
         self.bc = int(boundary)
         self.slices = slice(self.bc, -self.bc)
+        self.model = model.to(device=device, dtype=dtype)
+        self.GJ_coupling = GJ_coupling
 
-        self.model = model
-        self.normalize = normalize
+        self.model_path = f"Model_state/{model_name}/best_{model_name}_{GJ_coupling}_fullseq.pth"
+        self.if_normalize = if_normalize
         self.device = device
         self.dtype = dtype
+        self._load_model()
+        if self.if_normalize is not None:
+            self._load_scaler()
+            self.normalize = NormalizationCNN(self.scaler, slices=self.slices, device=device, dtype=dtype)
 
         self.I = torch.zeros(N, device=device, dtype=dtype)
+    def _load_model(self):
+        best_state = torch.load(self.model_path, map_location=self.device)
+        self.model.load_state_dict(best_state)
+        self.model.eval()
+    def _load_scaler(self):
+        if self.GJ_coupling == 'strong':
+            GJ = 735  # nS
+            scaler_name = 'Scaler/CNN/strong_standard_scaler.pkl'
+        elif self.GJ_coupling == 'weak':
+            GJ = 73.5 # nS
+            scaler_name = 'Scaler/CNN/weak_standard_scaler.pkl'
+        else:
+            GJ = 7.35 # nS
+        scaler_name = 'Scaler/CNN/SingleGJ_standard_scaler.pkl'
+        self.scaler = joblib.load(scaler_name)
 
     def compute(self, phi_i, ti=None):
         bc = self.bc
@@ -41,10 +77,10 @@ class NNCleftCoupling:
 
         # ---- NN cleft current ----
         phi_pad = phi_i[self.slices].reshape(1, 1, -1)  # (1,1,L)
-        if self.normalize is not None:
+        if self.if_normalize is not None:
             phi_pad = self.normalize.NormalizeInput(phi_pad)
         I_cleft = self.model(phi_pad)
-        if self.normalize is not None:
+        if self.if_normalize is not None:
             I_cleft = self.normalize.DenormalizeOutput(I_cleft)
         I_cleft = I_cleft.squeeze(0)  #  (1,L) or (2,L)
 
@@ -137,7 +173,7 @@ class CableSimulator:
                     if dt <= 0:
                         break
 
-                if print_every is not None and abs(math.fmod(self.ti, float(print_every))) < 1e-5:
+                if print_every is not None and abs(math.fmod(self.ti, float(print_every))) < 1e-8:
                     print(f"time: {self.ti:.2f} ms, dt={dt:.4g}")
 
                 I_couple = self.step(dt)
