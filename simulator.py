@@ -26,7 +26,7 @@ class ResistorCoupling(CouplingBase):
         I[-1]   = G * (phi_i[-1] - phi_i[-2])
         return I
 
-class NNSimpleCoupling(CouplingBase):
+class ResNetSimpleCoupling(CouplingBase):
     def __init__(self, 
                  N, 
                  Ggap, 
@@ -102,6 +102,76 @@ class NNSimpleCoupling(CouplingBase):
 
         return I_gap
 
+class MLPSimpleCoupling(CouplingBase):
+    def __init__(self, 
+                 N, 
+                 Ggap, 
+                 boundary, 
+                 model,
+                 GJ_coupling='SingleGJ',
+                 model_name = "MLP",
+                 if_normalize=None,  
+                 device=None, 
+                 dtype=torch.float32):
+        self.N = N
+        self.Ggap = Ggap
+        self.bc = int(boundary)
+        self.slices = slice(self.bc, -self.bc)
+        self.model = model.to(device=device, dtype=dtype)
+        self.GJ_coupling = GJ_coupling
+
+        self.model_path = f"Model_state/{model_name}/best_{model_name}_{GJ_coupling}_fullseq.pth"
+        self.if_normalize = if_normalize
+        self.device = device
+        self.dtype = dtype
+        self._load_model()
+        # if self.if_normalize is not None:
+        #     self._load_scaler()
+        #     self.normalize = NormalizationCNN(self.scaler, slices=self.slices, device=device, dtype=dtype)
+
+        self.I = torch.zeros(N, device=device, dtype=dtype)
+    def _load_model(self):
+        best_state = torch.load(self.model_path, map_location=self.device)
+        self.model.load_state_dict(best_state)
+        self.model.eval()
+
+    def _reshape(self, phi):
+        assert phi.ndim == 2, "phi must be 2D (T, Ncell)"
+        _, Ncell = phi.shape
+        assert Ncell >= 2, "Need at least 2 cells"
+
+        v_left  = phi[:, :-1]    # (T, Ncell-1)
+        v_right = phi[:, 1:]     # (T, Ncell-1)
+
+        pairs = torch.stack([v_left, v_right], dim=2)  # (T, Ncell-1, 2)
+
+        return pairs.reshape(-1, 2)
+
+    def compute(self, phi_i, ti=None):
+        Ggap = self.Ggap
+        I_gap = self.I
+        bc = self.bc
+
+        # ---- NN cleft current ----
+        phi_NN = self._reshape(phi_i[self.slices].unsqueeze(0))  # (N-1, 2)
+        I_cleft = self.model(phi_NN).reshape(1, -1)  # (1, N-1)
+
+        I_gap[1:bc] = Ggap * (phi_i[1:bc] - phi_i[:bc-1] + phi_i[1:bc] - phi_i[2:bc+1])
+        I_gap[-bc:-1] = Ggap * (phi_i[-bc:-1] - phi_i[-bc-1:-2] + phi_i[-bc:-1] - phi_i[-bc+1:])
+
+        # boundaries
+        I_gap[0]  = Ggap * (phi_i[0]  - phi_i[1])
+        I_gap[-1] = Ggap * (phi_i[-1] - phi_i[-2])
+
+        # interfaces to cleft region
+        I_gap[bc]    = Ggap * (phi_i[bc]    - phi_i[bc-1])
+        I_gap[-bc-1] = Ggap * (phi_i[-bc-1] - phi_i[-bc])
+
+        # ---- add cleft currents ----
+        I_gap[bc:-bc-1]   += -I_cleft[0, :]
+        I_gap[bc+1:-bc]   +=  I_cleft[0, :]
+
+        return I_gap
 
 class CableSimulator:
     def __init__(self, const, coupling, Ord11_model_fn, device, dtype, dt=0.01, save_stride=100):
@@ -127,6 +197,7 @@ class CableSimulator:
         self.S = self.const.S.clone()
         self.state = torch.cat((self.phi_i, self.G_i), dim=0)
         self.phi_save, self.I_save = [], []
+        self.last_print_time = 0.0
 
     def step(self, dt=None):
         if dt is not None:
@@ -148,7 +219,7 @@ class CableSimulator:
         self.state[0:self.N] = self.phi_i
         self.state[self.N:] = G_new
 
-        self.ti += self.dt
+        self.ti = round(self.ti + self.dt, 5) # avoid floating point error accumulation
         self.count += 1
         return I_couple
     def adaptive_step(self, ti):
@@ -157,7 +228,7 @@ class CableSimulator:
             return float(self.const.dt1), float(self.const.dt1_samp)
         else:
             return float(self.const.dt2), float(self.const.dt2_samp)
-    def run(self, T=None, print_every=100.0):
+    def run(self, T=None, print_every=1000.0):
         if T is None:
             T = float(self.const.T)
 
@@ -173,8 +244,9 @@ class CableSimulator:
                     if dt <= 0:
                         break
 
-                if print_every is not None and abs(math.fmod(self.ti, float(print_every))) < 1e-8:
+                if print_every is not None and (self.ti - self.last_print_time >= float(print_every)):
                     print(f"time: {self.ti:.2f} ms, dt={dt:.4g}")
+                    self.last_print_time += float(print_every)
 
                 I_couple = self.step(dt)
                 if self.ti + 1e-12 >= self.next_sample_time:
