@@ -119,8 +119,8 @@ class MLPSimpleCoupling(CouplingBase):
         self.slices = slice(self.bc, -self.bc)
         self.model = model.to(device=device, dtype=dtype)
         self.GJ_coupling = GJ_coupling
-
-        self.model_path = f"Model_state/{model_name}/best_{model_name}_{GJ_coupling}_fullseq.pth"
+        # self.model_path = f"Model_state/{model_name}/best_{model_name}_{GJ_coupling}_fullseq.pth"
+        self.model_path = f"Model_state/{model_name}/best_{model_name}_SingleGJ_adaptive.pth"
         self.if_normalize = if_normalize
         self.device = device
         self.dtype = dtype

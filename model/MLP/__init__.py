@@ -1,1 +1,1 @@
-from .MLP_model import MLP
+from .MLP_model import MLP, PIMLP

@@ -71,3 +71,45 @@ class MLP(nn.Module):
         x = self.mlp(x)
         x = self.out(x)
         return x
+class PIMLP(nn.Module):
+    """
+    Multi-Layer Perceptron (MLP) with optional residual connections on each layer.
+
+    Args:
+        input_dim (int): Dimension of the input features.
+        hidden_dims (list[int]): List of hidden layer sizes.
+        output_dim (int): Dimension of the output layer.
+        activation (nn.Module): Activation function class (default: nn.SiLU).
+        dropout (float): Dropout rate (default: 0.1).
+        layernorm (bool): Whether to apply LayerNorm after each Linear layer.
+    """
+    def __init__(self, input_dim, hidden_dims, output_dim, 
+                 activation=nn.SiLU, dropout=0.1, layernorm=True):
+        super().__init__()
+
+        blocks = []
+        prev_dim = input_dim
+
+        # Each hidden dimension corresponds to one ResidualBlock
+        for h_dim in hidden_dims:
+            blocks.append(
+                ResidualBlock(
+                    in_dim=prev_dim,
+                    out_dim=h_dim,
+                    activation=activation,
+                    dropout=dropout,
+                    layernorm=layernorm
+                )
+            )
+            prev_dim = h_dim
+
+        # Stack all blocks sequentially
+        self.mlp = nn.Sequential(*blocks)
+        self.out = nn.Linear(prev_dim, output_dim)
+
+    def forward(self, x):
+        dv = x[:, 1:2] - x[:, 0:1]
+        x = self.mlp(dv)
+        x = self.out(x)
+        g = torch.nn.functional.softplus(x)
+        return g * dv
