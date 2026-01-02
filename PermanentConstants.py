@@ -114,7 +114,7 @@ class Constants:
 
 
 class Normalization:
-    def __init__(self, scaler, device, dtype=torch.float32) -> None:
+    def __init__(self, scaler, device, slice, dtype=torch.float32) -> None:
         self.device  = device
         self.dtype   = dtype
         self.scaler  = scaler

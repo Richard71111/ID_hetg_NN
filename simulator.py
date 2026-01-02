@@ -43,7 +43,6 @@ class ResNetSimpleCoupling(CouplingBase):
         self.slices = slice(self.bc, -self.bc)
         self.model = model.to(device=device, dtype=dtype)
         self.GJ_coupling = GJ_coupling
-
         self.model_path = f"Model_state/{model_name}/best_{model_name}_{GJ_coupling}_fullseq.pth"
         self.if_normalize = if_normalize
         self.device = device
@@ -110,7 +109,7 @@ class MLPSimpleCoupling(CouplingBase):
                  model,
                  GJ_coupling='SingleGJ',
                  model_name = "MLP",
-                 if_normalize=None,  
+                 scaler=None,  
                  device=None, 
                  dtype=torch.float32):
         self.N = N
@@ -119,15 +118,16 @@ class MLPSimpleCoupling(CouplingBase):
         self.slices = slice(self.bc, -self.bc)
         self.model = model.to(device=device, dtype=dtype)
         self.GJ_coupling = GJ_coupling
+        self.count = 1
         # self.model_path = f"Model_state/{model_name}/best_{model_name}_{GJ_coupling}_fullseq.pth"
-        self.model_path = f"Model_state/{model_name}/best_{model_name}_SingleGJ_adaptive.pth"
-        self.if_normalize = if_normalize
+        self.model_path = f"Model_state/{model_name}/best_{model_name}_SingleGJ_adaptive_norm.pth"
+        self.scaler = scaler
+        if scaler is not None:
+            self.scaler_x = scaler['scaler_X']
+            self.scaler_y = scaler['scaler_Y']
         self.device = device
         self.dtype = dtype
         self._load_model()
-        # if self.if_normalize is not None:
-        #     self._load_scaler()
-        #     self.normalize = NormalizationCNN(self.scaler, slices=self.slices, device=device, dtype=dtype)
 
         self.I = torch.zeros(N, device=device, dtype=dtype)
     def _load_model(self):
@@ -148,13 +148,64 @@ class MLPSimpleCoupling(CouplingBase):
         return pairs.reshape(-1, 2)
 
     def compute(self, phi_i, ti=None):
+        # Ggap = self.Ggap
+        # I_gap = self.I
+        # bc = self.bc
+
+        # # ---- NN cleft current ----
+        # phi_NN = self._reshape(phi_i[self.slices].unsqueeze(0))  # (N-1, 2)
+        # if self.scaler is not None:
+        #     if self.count == 1:
+        #         print("Using normalization for MLP coupling model.")
+        #         self.count += 1
+        #     phi_NN = self.scaler_x.transform(phi_NN.cpu().numpy())
+        #     phi_NN = torch.from_numpy(phi_NN).to(device=self.device, dtype=self.dtype)
+        # I_cleft = self.model(phi_NN)
+        # if self.scaler is not None:
+        #     I_cleft = self.scaler_y.inverse_transform(I_cleft.cpu().numpy())
+        #     I_cleft = torch.from_numpy(I_cleft).to(device=self.device, dtype=self.dtype)
+        #     #phi_NN = torch.from_numpy(self.scaler_x.inverse_transform(phi_NN.cpu().numpy())).to(device=self.device, dtype=self.dtype)
+
+        # I_cleft = I_cleft.reshape(1, -1)  # (1, N-1)
+        # I_gap[1:bc] = Ggap * (phi_i[1:bc] - phi_i[:bc-1] + phi_i[1:bc] - phi_i[2:bc+1])
+        # I_gap[-bc:-1] = Ggap * (phi_i[-bc:-1] - phi_i[-bc-1:-2] + phi_i[-bc:-1] - phi_i[-bc+1:])
+
+        # # boundaries
+        # I_gap[0]  = Ggap * (phi_i[0]  - phi_i[1])
+        # I_gap[-1] = Ggap * (phi_i[-1] - phi_i[-2])
+
+        # # interfaces to cleft region
+        # I_gap[bc]    = Ggap * (phi_i[bc]    - phi_i[bc-1])
+        # I_gap[-bc-1] = Ggap * (phi_i[-bc-1] - phi_i[-bc])
+
+        # # ---- add cleft currents ----
+        # I_gap[bc:-bc-1]   += -I_cleft[0, :]
+        # I_gap[bc+1:-bc]   +=  I_cleft[0, :]
+
+        # return I_gap
         Ggap = self.Ggap
         I_gap = self.I
         bc = self.bc
 
-        # ---- NN cleft current ----
-        phi_NN = self._reshape(phi_i[self.slices].unsqueeze(0))  # (N-1, 2)
-        I_cleft = self.model(phi_NN).reshape(1, -1)  # (1, N-1)
+        # ---------- 1. NN 预测边电流 J ----------
+        # phi_NN shape: (M-1, 2)  for edges (bc+k, bc+k+1)
+        phi_NN = self._reshape(phi_i[self.slices].unsqueeze(0))
+
+        if self.scaler is not None:
+            phi_NN = self.scaler_x.transform(phi_NN.cpu().numpy())
+            phi_NN = torch.from_numpy(phi_NN).to(self.device, self.dtype)
+
+        J = self.model(phi_NN)    # edge currents
+
+        if self.scaler is not None:
+            J = self.scaler_y.inverse_transform(J.cpu().numpy())
+            J = torch.from_numpy(J).to(self.device, self.dtype)
+
+        J = J.view(-1)            # shape (M-1,)
+
+
+        # ---------- 2. bulk Laplacian outside NN region ----------
+        I_gap.zero_()
 
         I_gap[1:bc] = Ggap * (phi_i[1:bc] - phi_i[:bc-1] + phi_i[1:bc] - phi_i[2:bc+1])
         I_gap[-bc:-1] = Ggap * (phi_i[-bc:-1] - phi_i[-bc-1:-2] + phi_i[-bc:-1] - phi_i[-bc+1:])
@@ -163,13 +214,27 @@ class MLPSimpleCoupling(CouplingBase):
         I_gap[0]  = Ggap * (phi_i[0]  - phi_i[1])
         I_gap[-1] = Ggap * (phi_i[-1] - phi_i[-2])
 
-        # interfaces to cleft region
+        # interfaces to NN region (left and right)
         I_gap[bc]    = Ggap * (phi_i[bc]    - phi_i[bc-1])
         I_gap[-bc-1] = Ggap * (phi_i[-bc-1] - phi_i[-bc])
 
-        # ---- add cleft currents ----
-        I_gap[bc:-bc-1]   += -I_cleft[0, :]
-        I_gap[bc+1:-bc]   +=  I_cleft[0, :]
+
+        # ---------- 3. Add NN flux via discrete divergence ----------
+        # NN nodes: i = bc ... bc+M-1
+        # J[k] is flux from (bc+k) -> (bc+k+1)
+
+        M = phi_i[self.slices].numel()
+
+        # leftmost NN node
+        I_gap[bc] += -J[0]
+
+        # interior NN nodes
+        for k in range(1, M-1):
+            i = bc + k
+            I_gap[i] += J[k-1] - J[k]
+
+        # rightmost NN node
+        I_gap[bc + M - 1] += J[M-2]
 
         return I_gap
 
