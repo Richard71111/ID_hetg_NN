@@ -15,6 +15,7 @@ class ResistorCoupling(CouplingBase):
         self.device = device
         self.dtype = dtype
         self.I = torch.zeros(N, device=device, dtype=dtype)
+        self.bc = round(0.25 * N)  
 
     def compute(self, phi_i, ti=None):
         I = self.I
@@ -148,46 +149,12 @@ class MLPSimpleCoupling(CouplingBase):
         return pairs.reshape(-1, 2)
 
     def compute(self, phi_i, ti=None):
-        # Ggap = self.Ggap
-        # I_gap = self.I
-        # bc = self.bc
-
-        # # ---- NN cleft current ----
-        # phi_NN = self._reshape(phi_i[self.slices].unsqueeze(0))  # (N-1, 2)
-        # if self.scaler is not None:
-        #     if self.count == 1:
-        #         print("Using normalization for MLP coupling model.")
-        #         self.count += 1
-        #     phi_NN = self.scaler_x.transform(phi_NN.cpu().numpy())
-        #     phi_NN = torch.from_numpy(phi_NN).to(device=self.device, dtype=self.dtype)
-        # I_cleft = self.model(phi_NN)
-        # if self.scaler is not None:
-        #     I_cleft = self.scaler_y.inverse_transform(I_cleft.cpu().numpy())
-        #     I_cleft = torch.from_numpy(I_cleft).to(device=self.device, dtype=self.dtype)
-        #     #phi_NN = torch.from_numpy(self.scaler_x.inverse_transform(phi_NN.cpu().numpy())).to(device=self.device, dtype=self.dtype)
-
-        # I_cleft = I_cleft.reshape(1, -1)  # (1, N-1)
-        # I_gap[1:bc] = Ggap * (phi_i[1:bc] - phi_i[:bc-1] + phi_i[1:bc] - phi_i[2:bc+1])
-        # I_gap[-bc:-1] = Ggap * (phi_i[-bc:-1] - phi_i[-bc-1:-2] + phi_i[-bc:-1] - phi_i[-bc+1:])
-
-        # # boundaries
-        # I_gap[0]  = Ggap * (phi_i[0]  - phi_i[1])
-        # I_gap[-1] = Ggap * (phi_i[-1] - phi_i[-2])
-
-        # # interfaces to cleft region
-        # I_gap[bc]    = Ggap * (phi_i[bc]    - phi_i[bc-1])
-        # I_gap[-bc-1] = Ggap * (phi_i[-bc-1] - phi_i[-bc])
-
-        # # ---- add cleft currents ----
-        # I_gap[bc:-bc-1]   += -I_cleft[0, :]
-        # I_gap[bc+1:-bc]   +=  I_cleft[0, :]
-
-        # return I_gap
+        
         Ggap = self.Ggap
         I_gap = self.I
         bc = self.bc
 
-        # ---------- 1. NN 预测边电流 J ----------
+        # ---------- 1. NN edge current J ----------
         # phi_NN shape: (M-1, 2)  for edges (bc+k, bc+k+1)
         phi_NN = self._reshape(phi_i[self.slices].unsqueeze(0))
 
@@ -239,11 +206,12 @@ class MLPSimpleCoupling(CouplingBase):
         return I_gap
 
 class CableSimulator:
-    def __init__(self, const, coupling, Ord11_model_fn, device, dtype, dt=0.01, save_stride=100):
+    def __init__(self, const, coupling, Ord11_model_fn, device, dtype, Vthresh = -60, dt=0.01, save_stride=100):
         self.const = const
         self.parameters = const.parameters
         self.coupling = coupling
         self.Ord11_model_fn = Ord11_model_fn
+        self.Vthresh = Vthresh
         self.device = device
         self.dtype = dtype
 
@@ -263,26 +231,74 @@ class CableSimulator:
         self.state = torch.cat((self.phi_i, self.G_i), dim=0)
         self.phi_save, self.I_save = [], []
         self.last_print_time = 0.0
+        self.beat_num = [0 for _ in range(self.N)]   # 0-based
+        self.tup      = [[] for _ in range(self.N)]
+        self.trepol   = [[] for _ in range(self.N)]
 
+    def update_tup_repol(self,):
+        Vm = self.phi_i
+        Vm_old = self.phi_old
+
+        for i in range(self.N):
+
+            # ---------- upstroke ----------
+            if (Vm[i] > self.Vthresh) and (Vm_old[i] < self.Vthresh):
+                y1 = Vm_old[i]
+                y2 = Vm[i]
+                m  = (y2 - y1) / self.dt
+                t_cross = self.ti - (y1 - self.Vthresh) / m
+
+                b = self.beat_num[i]
+                if b == len(self.tup[i]):
+                    self.tup[i].append(t_cross)
+                else:
+                    self.tup[i][b] = t_cross
+
+            # ---------- downstroke ----------
+            if (Vm[i] < self.Vthresh) and (Vm_old[i] > self.Vthresh):
+                b = self.beat_num[i]
+                if b < len(self.tup[i]) and (self.ti - self.tup[i][b]) > 0.1:
+                    y1 = Vm_old[i]
+                    y2 = Vm[i]
+                    m  = (y2 - y1) / self.dt
+                    t_cross = self.ti - (y1 - self.Vthresh) / m
+
+                    if b == len(self.trepol[i]):
+                        self.trepol[i].append(t_cross)
+                    else:
+                        self.trepol[i][b] = t_cross
+
+                    self.beat_num[i] += 1
+    def compute_CV(self):
+        i1 = self.coupling.bc - 2
+        i2 = self.N - 1 - i1
+        dx = self.parameters["L"] / 1000.0  # mm
+
+        t1 = self.tup[i1][0]
+        t2 = self.tup[i2][0]
+
+        return dx * (i2 - i1) / (t2 - t1)
+    
     def step(self, dt=None):
         if dt is not None:
             self.dt = float(dt)
         self.parameters["dt"] = self.dt
 
         I_couple = self.coupling.compute(self.phi_i, self.ti)
-
+        self.phi_old = self.phi_i.clone()
         Iion, _, G_new, _ = self.Ord11_model_fn(
             self.ti, self.state, self.parameters, self.S, self.device, self.dtype
         )
         if torch.isnan(Iion).any():
             raise FloatingPointError(f"NaN in Iion at time {self.ti}")
-
+                
         self.phi_i = self.state[0:self.N] - self.dt / self.Ctot * (Iion + I_couple)
         if torch.isnan(self.phi_i).any():
             raise FloatingPointError(f"NaN in phi at time {self.ti}")
 
         self.state[0:self.N] = self.phi_i
         self.state[self.N:] = G_new
+        self.update_tup_repol()
 
         self.ti = round(self.ti + self.dt, 5) # avoid floating point error accumulation
         self.count += 1
@@ -319,11 +335,11 @@ class CableSimulator:
                     self.I_save.append(I_couple.clone())
                     self.t_save.append(self.ti)
                     self.next_sample_time += dt_samp
-
+        self.cv = self.compute_CV()
         phi_save = torch.stack(self.phi_save, dim=0) if self.phi_save else torch.empty(0)
         I_save   = torch.stack(self.I_save, dim=0) if self.I_save else torch.empty(0)
         t_save   = torch.tensor(self.t_save, device=self.device, dtype=self.dtype) if self.t_save else torch.empty(0)
 
         print(f"Simulation time: {time.time() - start:.2f} seconds")
-        return t_save, phi_save, I_save
+        return t_save, phi_save, I_save, self.cv
 
